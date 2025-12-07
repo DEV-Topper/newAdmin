@@ -294,6 +294,16 @@ export function UsersTable() {
   const [fundError, setFundError] = useState<string | null>(null);
   const [fundSubmitting, setFundSubmitting] = useState(false);
 
+  const [debitModalOpen, setDebitModalOpen] = useState(false);
+  const [debitTarget, setDebitTarget] = useState<{
+    id: string;
+    name: string;
+    currentBalance: number;
+  } | null>(null);
+  const [debitAmount, setDebitAmount] = useState("");
+  const [debitError, setDebitError] = useState<string | null>(null);
+  const [debitSubmitting, setDebitSubmitting] = useState(false);
+
   const [statusSubmitting, setStatusSubmitting] = useState(false);
 
   // 🧩 Fetch userss
@@ -389,6 +399,17 @@ export function UsersTable() {
     setFundModalOpen(true);
   }
 
+  function openDebitModal(row: any) {
+    setDebitTarget({
+      id: row.id,
+      name: row.name,
+      currentBalance: typeof row.rawBalance === "number" ? row.rawBalance : 0,
+    });
+    setDebitAmount("");
+    setDebitError(null);
+    setDebitModalOpen(true);
+  }
+
   async function handleFundSubmit(e: any) {
     e.preventDefault();
     if (!fundTarget) return;
@@ -427,11 +448,54 @@ export function UsersTable() {
     }
   }
 
+  async function handleDebitSubmit(e: any) {
+    e.preventDefault();
+    if (!debitTarget) return;
+
+    const amountNumber = Number(debitAmount);
+    if (!amountNumber || isNaN(amountNumber) || amountNumber <= 0) {
+      setDebitError("Enter a valid amount greater than zero.");
+      return;
+    }
+
+    if (amountNumber > debitTarget.currentBalance) {
+      setDebitError("Debit amount cannot exceed current balance.");
+      return;
+    }
+
+    setDebitSubmitting(true);
+    try {
+      const userRef = doc(db, "users", debitTarget.id);
+      const newBalance = (debitTarget.currentBalance || 0) - amountNumber;
+
+      await updateDoc(userRef, {
+        balance: newBalance,
+      });
+
+      await addDoc(collection(db, "transactionNotifications"), {
+        userId: debitTarget.id,
+        amount: amountNumber,
+        type: "withdrawal",
+        source: "admin",
+        timestamp: serverTimestamp(),
+      });
+
+      setDebitModalOpen(false);
+      setDebitTarget(null);
+      setDebitError(null);
+    } catch (err) {
+      console.error("Failed to debit user:", err);
+      setDebitError("Failed to debit user. Please try again.");
+    } finally {
+      setDebitSubmitting(false);
+    }
+  }
+
   async function handleToggleSuspend(id?: string, currentStatus?: string) {
     if (!id) return;
     const nextStatus = currentStatus === "Suspended" ? "Active" : "Suspended";
 
-    const actionLabel = nextStatus === "Suspended" ? "suspend" : "unsuspend";
+    const actionLabel = nextStatus === "Suspended" ? "unsuspend" : "suspend";
     const ok = confirm(`Are you sure you want to ${actionLabel} this user?`);
     if (!ok) return;
 
@@ -534,7 +598,9 @@ export function UsersTable() {
                       <TableCell>{row.totalSpent}</TableCell>
                       <TableCell>{row.joinedDate}</TableCell>
                       <TableCell>
-                        <Badge>{row.status}</Badge>
+                        <Badge variant={row.status === "Suspended" ? "destructive" : "default"}>
+                          {row.status}
+                        </Badge>
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-2">
@@ -546,9 +612,16 @@ export function UsersTable() {
                             Fund
                           </Button>
                           <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openDebitModal(row)}
+                          >
+                            Debit
+                          </Button>
+                          <Button
                             variant={
                               row.status === "Suspended"
-                                ? "outline"
+                                ? "default"
                                 : "destructive"
                             }
                             size="sm"
@@ -628,6 +701,54 @@ export function UsersTable() {
             </Button>
             <Button type="submit" disabled={fundSubmitting || !fundTarget}>
               {fundSubmitting ? "Funding..." : "Confirm Funding"}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        isOpen={debitModalOpen}
+        onClose={() => {
+          setDebitModalOpen(false);
+          setDebitTarget(null);
+          setDebitError(null);
+        }}
+        title="Debit User Wallet"
+      >
+        <form className="space-y-4" onSubmit={handleDebitSubmit}>
+          <p className="text-sm text-gray-700">
+            {debitTarget
+              ? `Debit funds from ${
+                  debitTarget.name
+                }'s balance. Current balance: ₦${debitTarget.currentBalance.toLocaleString()}.`
+              : "No user selected."}
+          </p>
+          <div className="space-y-2">
+            <Input
+              type="number"
+              min={0}
+              step="0.01"
+              placeholder="Amount in ₦"
+              value={debitAmount}
+              onChange={(e) => setDebitAmount(e.target.value)}
+            />
+            {debitError && <p className="text-sm text-red-600">{debitError}</p>}
+          </div>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setDebitModalOpen(false);
+                setDebitTarget(null);
+                setDebitError(null);
+              }}
+              disabled={debitSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={debitSubmitting || !debitTarget}>
+              {debitSubmitting ? "Debiting..." : "Confirm Debit"}
             </Button>
           </div>
         </form>

@@ -898,47 +898,62 @@ export default function DashboardPage() {
       setWeeklyStats((prev) => ({ ...prev, newMembers: weeklyNewMembers }));
     });
 
-    // Fetch today's deposits (transactionNotifications)
-    // Fetch today's deposits (transactionNotifications)
+    // Fetch today's deposits and debits (transactionNotifications)
     const depositsQuery = query(collection(db, "transactionNotifications"));
 
     const unsubDeposits = onSnapshot(depositsQuery, (snapshot) => {
       let todayDepositsAmount = 0;
+      let todayDebitsAmount = 0;
       let weeklyDepositsAmount = 0;
+      let weeklyDebitsAmount = 0;
 
       snapshot.docs.forEach((doc) => {
         const data = doc.data();
         const { amount, createdAt, timestamp, type } = data;
 
-        if (type !== "deposit") return;
-
         // ✅ Safely convert to Date
-        let depositDate = null;
+        let transactionDate = null;
         if (timestamp?.toDate) {
-          depositDate = timestamp.toDate();
+          transactionDate = timestamp.toDate();
         } else if (typeof createdAt === "string") {
-          depositDate = new Date(createdAt);
+          transactionDate = new Date(createdAt);
         }
 
-        if (depositDate) {
-          if (isToday(depositDate)) {
-            todayDepositsAmount += Number(amount) || 0;
-          }
-
-          if (isWithinLastDays(depositDate, 7)) {
-            weeklyDepositsAmount += Number(amount) || 0;
+        if (transactionDate) {
+          const amountNum = Number(amount) || 0;
+          
+          if (type === "deposit") {
+            // Add deposits
+            if (isToday(transactionDate)) {
+              todayDepositsAmount += amountNum;
+            }
+            if (isWithinLastDays(transactionDate, 7)) {
+              weeklyDepositsAmount += amountNum;
+            }
+          } else if (type === "withdrawal") {
+            // Subtract debits
+            if (isToday(transactionDate)) {
+              todayDebitsAmount += amountNum;
+            }
+            if (isWithinLastDays(transactionDate, 7)) {
+              weeklyDebitsAmount += amountNum;
+            }
           }
         }
       });
 
+      // Calculate net deposits (deposits - debits)
+      const todayNetDeposits = todayDepositsAmount - todayDebitsAmount;
+      const weeklyNetDeposits = weeklyDepositsAmount - weeklyDebitsAmount;
+
       setTodayStats((prev) => ({
         ...prev,
-        todayDeposits: todayDepositsAmount,
+        todayDeposits: todayNetDeposits > 0 ? todayNetDeposits : 0,
       }));
 
       setWeeklyStats((prev) => ({
         ...prev,
-        todayDeposits: weeklyDepositsAmount,
+        todayDeposits: weeklyNetDeposits > 0 ? weeklyNetDeposits : 0,
       }));
     });
 
@@ -1153,8 +1168,8 @@ export default function DashboardPage() {
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-base font-medium text-card-foreground">
                 {performanceRange === "today"
-                  ? "Today's Deposits"
-                  : "Weekly Deposits"}
+                  ? "Today's Net Deposits"
+                  : "Weekly Net Deposits"}
               </CardTitle>
               <TrendingUp className="h-5 w-5 text-primary" />
             </CardHeader>
@@ -1163,7 +1178,7 @@ export default function DashboardPage() {
                 ₦{activeStats.todayDeposits.toLocaleString()}
               </div>
               <p className="text-xs text-muted-foreground mt-2">
-                Total deposits from transaction notifications
+                Total deposits from transaction notifications (after debits)
               </p>
             </CardContent>
           </Card>
